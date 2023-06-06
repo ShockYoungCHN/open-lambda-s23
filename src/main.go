@@ -23,8 +23,9 @@ import (
 	"github.com/open-lambda/open-lambda/ol/boss"
 	"github.com/open-lambda/open-lambda/ol/common"
 	"github.com/open-lambda/open-lambda/ol/server"
+	"github.com/open-lambda/open-lambda/ol/websocket"
 
-	"github.com/urfave/cli"	
+	"github.com/urfave/cli"
 )
 
 var client *docker.Client
@@ -282,6 +283,14 @@ func runBoss(ctx *cli.Context) error {
 	return bossStart(ctx)
 }
 
+func startWebSocketAPI(ctx *cli.Context) error {
+	// start the websocket API server
+	if err := websocket.Start(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
 // status corresponds to the "status" command of the admin tool.
 func status(ctx *cli.Context) error {
 	olPath, err := common.GetOlPath(ctx)
@@ -466,7 +475,7 @@ func bossStart(ctx *cli.Context) error {
 
 		fmt.Printf("Starting boss: pid=%d, port=%s, log=%s\n", proc.Pid, boss.Conf.Boss_port, logPath)
 		return nil // TODO: ping status to make sure it is actually running?
-    }
+	}
 
 	if err := boss.BossMain(); err != nil {
 		return err
@@ -660,6 +669,25 @@ OPTIONS:
 			Action:      newBoss,
 		},
 		cli.Command{
+			Name:        "websocket-api",
+			Usage:       "Start the WebSocket API server",
+			UsageText:   "ol websocket-api [--port=PORT] [--host=HOST]",
+			Description: "Start a WebSocket API server to provide real-time communication",
+			Action:      startWebSocketAPI,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "port, p",
+					Value: "4999", // default port
+					Usage: "Port on which the WebSocket API server will listen",
+				},
+				cli.StringFlag{
+					Name:  "host, H",
+					Value: "localhost", // default host
+					Usage: "Host on which the WebSocket API server will listen",
+				},
+			},
+		},
+		cli.Command{
 			Name:        "boss",
 			Usage:       "Start an OL Boss process",
 			UsageText:   "ol boss [--path=PATH] [--detach]",
@@ -709,24 +737,24 @@ OPTIONS:
 			Action:    cleanup,
 		},
 		cli.Command{
-			Name: "bench",
-			Usage: "Run benchmarks against an OL worker.",
-			UsageText: "ol bench <cmd>",
+			Name:        "bench",
+			Usage:       "Run benchmarks against an OL worker.",
+			UsageText:   "ol bench <cmd>",
 			Subcommands: bench.BenchCommands(),
 		},
 		cli.Command{
-			Name: "pprof",
-			Usage: "Profile OL worker",
+			Name:      "pprof",
+			Usage:     "Profile OL worker",
 			UsageText: "ol pprof <cmd>",
 			Subcommands: []cli.Command{
 				{
-					Name:  "mem",
-					Usage: "creates lambdas for benchmarking",
+					Name:      "mem",
+					Usage:     "creates lambdas for benchmarking",
 					UsageText: "ol pprof mem [--out=NAME]",
-					Action: pprofMem,
+					Action:    pprofMem,
 					Flags: []cli.Flag{
 						cli.StringFlag{
-							Name:  "out, o",
+							Name: "out, o",
 						},
 					},
 				},

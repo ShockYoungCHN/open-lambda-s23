@@ -91,7 +91,7 @@ func (linst *LambdaInstance) Task() {
 				sb = nil
 			}
 			t2.T1()
-			
+
 		}
 
 		// if we don't already have a Sandbox, create one, and
@@ -130,7 +130,7 @@ func (linst *LambdaInstance) Task() {
 
 		// below here, we're guaranteed (1) sb != nil, (2) proxy != nil, (3) sb is unpaused
 
-		// serve until we incoming queue is empty
+		// serve until the incoming queue is empty
 		t = common.T0("LambdaInstance-ServeRequests")
 		for req != nil {
 			f.printf("Forwarding request to sandbox")
@@ -161,8 +161,8 @@ func (linst *LambdaInstance) Task() {
 					// copy body
 					if _, err := io.Copy(req.w, resp.Body); err != nil {
 						// already used WriteHeader, so can't use that to surface on error anymore
-						msg := "reading lambda response failed: "+err.Error()+"\n"
-						f.printf("error: "+msg)
+						msg := "reading lambda response failed: " + err.Error() + "\n"
+						f.printf("error: " + msg)
 						linst.TrySendError(req, 0, msg, sb)
 					}
 
@@ -225,9 +225,9 @@ func (linst *LambdaInstance) TrySendError(req *Invocation, statusCode int, msg s
 
 	var err error
 	if sb != nil {
-		_, err = req.w.Write([]byte(msg+"\nSandbox State: "+sb.DebugString()+"\n"))
+		_, err = req.w.Write([]byte(msg + "\nSandbox State: " + sb.DebugString() + "\n"))
 	} else {
-		_, err = req.w.Write([]byte(msg+"\n"))
+		_, err = req.w.Write([]byte(msg + "\n"))
 	}
 
 	if err != nil {

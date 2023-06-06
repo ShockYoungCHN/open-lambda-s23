@@ -6,13 +6,14 @@ import (
 	"net"
 	"reflect"
 	"sync"
-	"syscall"
 )
 
+// epoll is a wrapper around the epoll system call.
+// It is used to wait for events on a set of file descriptors.
 type epoll struct {
-	fd          int
-	connections map[int]net.Conn
-	lock        *sync.RWMutex
+	fd      int
+	clients map[int]*Client
+	lock    *sync.RWMutex
 }
 
 func MkEpoll() (*epoll, error) {
@@ -21,57 +22,62 @@ func MkEpoll() (*epoll, error) {
 		return nil, err
 	}
 	return &epoll{
-		fd:          fd,
-		lock:        &sync.RWMutex{},
-		connections: make(map[int]net.Conn),
+		fd:      fd,
+		lock:    &sync.RWMutex{},
+		clients: make(map[int]*Client),
 	}, nil
 }
 
-func (e *epoll) Add(conn net.Conn) error {
+func (e *epoll) Add(client *Client) error {
+	conn := client.conn
 	// Extract file descriptor associated with the connection
 	fd := websocketFD(conn)
-	err := unix.EpollCtl(e.fd, syscall.EPOLL_CTL_ADD, fd, &unix.EpollEvent{Events: unix.POLLIN | unix.POLLHUP, Fd: int32(fd)})
+	event := &unix.EpollEvent{
+		Events: unix.POLLIN | unix.POLLHUP,
+		Fd:     int32(fd),
+	}
+	err := unix.EpollCtl(e.fd, unix.EPOLL_CTL_ADD, fd, event)
 	if err != nil {
 		return err
 	}
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	e.connections[fd] = conn
-	if len(e.connections)%100 == 0 {
-		log.Printf("Total number of connections: %v", len(e.connections))
+	e.clients[fd] = client
+	if len(e.clients)%100 == 0 {
+		log.Printf("Total number of connections: %v", len(e.clients))
 	}
 	return nil
 }
 
-func (e *epoll) Remove(conn net.Conn) error {
+func (e *epoll) Remove(client *Client) error {
+	conn := client.conn
 	fd := websocketFD(conn)
-	err := unix.EpollCtl(e.fd, syscall.EPOLL_CTL_DEL, fd, nil)
+	err := unix.EpollCtl(e.fd, unix.EPOLL_CTL_DEL, fd, nil)
 	if err != nil {
 		return err
 	}
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	delete(e.connections, fd)
-	if len(e.connections)%100 == 0 {
-		log.Printf("Total number of connections: %v", len(e.connections))
+	delete(e.clients, fd)
+	if len(e.clients)%100 == 0 {
+		log.Printf("Total number of connections: %v", len(e.clients))
 	}
 	return nil
 }
 
-func (e *epoll) Wait() ([]net.Conn, error) {
+func (e *epoll) Wait() ([]*Client, error) {
 	events := make([]unix.EpollEvent, 100)
 	n, err := unix.EpollWait(e.fd, events, 100)
 	if err != nil {
 		return nil, err
 	}
-	e.lock.RLock()
-	defer e.lock.RUnlock()
-	var connections []net.Conn
+
+	var clients []*Client
 	for i := 0; i < n; i++ {
-		conn := e.connections[int(events[i].Fd)]
-		connections = append(connections, conn)
+		client := e.clients[int(events[i].Fd)]
+		clients = append(clients, client)
 	}
-	return connections, nil
+	return clients, nil
 }
 
 func websocketFD(conn net.Conn) int {

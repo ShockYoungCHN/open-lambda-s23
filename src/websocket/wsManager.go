@@ -1,22 +1,29 @@
 package websocket
 
+import "C"
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/go-redis/redis/v8"
 	"github.com/gobwas/ws/wsutil"
 	"github.com/google/uuid"
+	pb "github.com/open-lambda/open-lambda/ol/websocket/proto"
+	"google.golang.org/grpc"
 	"log"
+	"net"
 	"sync"
 	"time"
 )
+
+// not sure if epoll should be here or somewhere else
+var clientEpoll *epoll
 
 type WsManager struct {
 	clients    sync.Map
 	pubSubType string
 	pubSub     PubSub        // the pubsub that is used to publish and subscribe to topics, e,g redis, kafka, etc
 	redis      *redis.Client // the db that stores all the connection id. todo: make this a generic interface
+	pb.UnimplementedWsManagerServer
 }
 
 func NewWsManager() *WsManager {
@@ -35,24 +42,28 @@ func NewWsManager() *WsManager {
 	}
 }
 
-func (manager *WsManager) RegisterClient(id uuid.UUID, wsClient *Client) {
-	manager.clients.Store(id.String(), wsClient)
+// RegisterClient registers a client to the manager and the epoll, call onConnect func in lamda
+func (manager *WsManager) RegisterClient(client *Client) {
+	manager.clients.Store(client.id.String(), client)
+	// register client to epoll
+	clientEpoll.Add(client)
 
-	ctx := context.Background()
-	err := manager.redis.SAdd(ctx, "clients", id.String(), 0).Err()
-	if err != nil {
-		panic(err)
-	}
+	// call onConnect func in lambda
+	// set up the event for onConnect
+	client.event = &Event{&Context{Id: client.id}, nil}
+	client.wsPacket.Target = "onConnect"
+	client.sendRequest()
 }
 
-func (manager *WsManager) UnregisterClient(id uuid.UUID) {
+func (manager *WsManager) UnregisterClient(client *Client) {
+	id := client.id
 	manager.clients.Delete(id.String())
-
-	ctx := context.Background()
-	err := manager.redis.SRem(ctx, "clients", id.String(), 0).Err()
-	if err != nil {
-		panic(err)
-	}
+	// unregister client from epoll
+	clientEpoll.Remove(client)
+	// call onDisconnect func in lambda
+	client.event = &Event{&Context{Id: client.id}, nil}
+	client.wsPacket.Target = "onDisconnect"
+	client.sendRequest()
 }
 
 func (manager *WsManager) GetClient(id uuid.UUID) (*Client, bool) {
@@ -64,7 +75,8 @@ func (manager *WsManager) GetClient(id uuid.UUID) (*Client, bool) {
 	return nil, false
 }
 
-func (manager *WsManager) subscribe(channel ...string) *<-chan PubSubMessage {
+// deprecated pubsub
+/*func (manager *WsManager) subscribe(channel ...string) *<-chan PubSubMessage {
 	ch := manager.pubSub.Subscribe(channel...)
 
 	msgChan := make(chan PubSubMessage, 10)
@@ -84,19 +96,6 @@ func (manager *WsManager) subscribe(channel ...string) *<-chan PubSubMessage {
 			}
 		}()
 		// todo: add sarama kafka support
-		/*	case *sarama.ConsumerMessage:
-			go func() {
-				for {
-					select {
-					case kafkaMsg := <-ch:
-						msg := PubSubMessage{
-							Topic:   kafkaMsg.Topic,
-							Message: kafkaMsg.Value,
-						}
-						msgChan <- msg
-					}
-				}
-			}()*/
 	default:
 		panic(fmt.Sprintf("Invalid channel type: %T", ch))
 	}
@@ -125,26 +124,7 @@ func (manager *WsManager) publish(v interface{}, channel ...string) {
 	log.Println("publishing to channel: ", channel)
 	manager.pubSub.Publish(v, channel...)
 }
-
-func (manager *WsManager) getAllWsConn() []string {
-	ctx := context.Background()
-	members, err := manager.redis.SMembers(ctx, "clients").Result()
-	if err != nil {
-		panic(err)
-	}
-	return members
-}
-
-// TODO: monitor redis pubsub channels and send messages to clients
-/*
-// send sends the http request to the lambda server and sends the response to the client
-func send(client *Client) {
-
-	err = wsutil.WriteServerText(client.conn, body)
-	if err != nil {
-		log.Printf("failed to write WebSocket message: %s", err)
-	}
-}*/
+*/
 
 func (manager *WsManager) monitorChannels() {
 	log.Println("monitoring channels for clients")
@@ -176,4 +156,62 @@ func (manager *WsManager) monitorChannels() {
 		time.Sleep(2 * time.Second)
 		log.Println("size of clients: ", size)
 	}
+}
+
+// todo: a indiv method to send msg back to client connections
+/*func (manager *WsManager) postToConnection(msg string, connectionId string) {
+	log.Println("posting to connection: ", connectionId)
+	client, ok := manager.clients.Load(connectionId)
+	if !ok {
+		log.Println("Connection not found: ", connectionId)
+		return
+	}
+
+	wsClient := client.(*Client)
+	wsClient.writeMux.Lock()
+	defer wsClient.writeMux.Unlock()
+	err := wsutil.WriteServerText(wsClient.conn, []byte(msg))
+	if err != nil {
+		log.Printf("failed to write WebSocket message: %s", err)
+	}
+}*/
+
+// startInternalApi starts internal APIs for lambda functions
+func (manager *WsManager) startInternalApi() {
+	log.Println("starting internal APIs")
+	ip := "172.29.96.75" //todo: get ip from env
+	lis, err := net.Listen("tcp", ip+":50051")
+	if err != nil {
+		log.Fatalf("internal APIs failed to listen: %v", err)
+	}
+	s := grpc.NewServer()
+	pb.RegisterWsManagerServer(s, manager)
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("internal APIs failed to serve: %v", err)
+	}
+}
+
+// PostToConnection is an internal gRPC method for lambda functions to call
+// post message to a connection
+func (manager *WsManager) PostToConnection(ctx context.Context, req *pb.PostToConnectionRequest) (*pb.PostToConnectionResponse, error) {
+	log.Println("posting to connection: ", req.ConnectionId)
+	client, ok := manager.clients.Load(req.ConnectionId)
+	if !ok {
+		return &pb.PostToConnectionResponse{
+			Success: false,
+			Error:   "Client not found",
+		}, nil
+	}
+	wsClient := client.(*Client)
+	err := wsutil.WriteServerText(wsClient.conn, []byte(req.Msg))
+	if err != nil {
+		return &pb.PostToConnectionResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to write WebSocket message: %s", err),
+		}, nil
+	}
+	return &pb.PostToConnectionResponse{
+		Success: true,
+		Error:   "",
+	}, nil
 }

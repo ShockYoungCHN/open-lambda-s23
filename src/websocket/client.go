@@ -4,22 +4,36 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/go-redis/redis/v8"
+	"github.com/gobwas/ws/wsutil"
 	"github.com/google/uuid"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"sync"
 )
 
 type Client struct {
-	conn        net.Conn
-	id          uuid.UUID
-	target      string
-	pubTopics   string // channel or topic to publish to, currently only one, but could be multiple in the future
-	msgChan     *<-chan PubSubMessage
-	requestPath string
-	PubSub      *redis.PubSub
-	wsPacket    WsPacket
+	// todo:below 4 are related to pubsub, maybe deleted
+	target    string
+	pubTopics string // channel or topic to publish to, currently only one, but could be multiple in the future
+	msgChan   *<-chan PubSubMessage
+	PubSub    *redis.PubSub
+
+	conn     net.Conn
+	id       uuid.UUID
+	wsPacket WsPacket
+	writeMux sync.Mutex
+	event    *Event
+}
+
+type Event struct {
+	Context *Context `json:"context"`
+	Body    *string  `json:"body"`
+}
+
+type Context struct {
+	Id uuid.UUID `json:"id"`
 }
 
 func (client *Client) onConnect() {
@@ -28,18 +42,21 @@ func (client *Client) onConnect() {
 		log.Fatalf("Failed to generate UUID: %v", err)
 	}
 	client.id = id
-	manager.RegisterClient(client.id, client)
+	manager.RegisterClient(client)
+
+	wsutil.WriteServerText(client.conn, []byte(id.String()))
 }
 
-func (client *Client) onClose() {
+func (client *Client) onDisconnect() {
 	err := client.conn.Close()
 	if err != nil {
 		return
 	}
-	manager.UnregisterClient(client.id)
+
+	manager.UnregisterClient(client)
 }
 
-func (client *Client) sub() {
+/*func (client *Client) sub() {
 	client.msgChan = manager.subscribe(client.wsPacket.Target)
 	log.Printf("%s subscribed to %s \n", client.id.String(), client.wsPacket.Target)
 }
@@ -54,22 +71,22 @@ func (client *Client) unsubscribe() {
 		return
 	}
 }
+*/
 
 func (client *Client) run() {
-	payload, err := json.Marshal(client.wsPacket)
-	body, _, err := sendRequest(payload)
+	respBody, _, err := client.sendRequest() // todo: respBody seems not to be used
 	if err != nil {
 		log.Println(err)
-		body = []byte(err.Error())
+		log.Println(respBody)
 	}
-	go client.pub(body)
 }
 
 // sendRequest sends an HTTP request to the lambda server and returns the response body
-func sendRequest(payload []byte) ([]byte, int, error) {
-	url := "http://localhost:" + conf.Boss_port + "/run/echo" // todo: get "/run/echo" from wsPacket
+func (client *Client) sendRequest() ([]byte, int, error) {
+	url := "http://localhost:" + conf.Boss_port + "/run/" + client.wsPacket.Target
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
+	eventBytes, _ := json.Marshal(client.event)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(eventBytes))
 	if err != nil {
 		return nil, -1, err
 	}
