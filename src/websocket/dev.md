@@ -1,15 +1,17 @@
 This document is a guide for developers to set up auto deployment and debug environment for the websocket server.
 I code in Goland running on Windows, and the websocket server runs on a remote machine. The code are automatically deployed to the remote machine by Goland.
 
-My remote machine environment: Ubuntu 20.04, go version go1.18.3 linux/amd64. All the following instructions are based on this environment.
+My remote machine environment: Ubuntu 22.04, go version go1.18.3 linux/amd64. All the following instructions are based on this environment.
 
 Goland UI may varies, as I am using so-called `new UI` (you can find and switch to it in the settings), which is different from the `classic UI`.
 
 Before setup auto deployment and debug, you are expected to finish the following steps:
 1. Install go on the remote machine
-2. Set up ssh connection between your local machine and the remote machine
-3. Install Goland on your local machine
-4. clone the repo to your remote machine and successfully build the project
+2. Make sure ssh connection works between your local machine and the remote machine
+3. Install Goland on your local machine (use student email to get it for free)
+4. Clone another in your local, open it with Goland
+5. Clone the repo to your remote machine and successfully build the project
+
 
 # deploy
 
