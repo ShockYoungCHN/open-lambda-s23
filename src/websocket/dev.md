@@ -15,7 +15,7 @@ Before setup auto deployment and debug, you are expected to finish the following
 
 # deploy
 
-ctrl+alt+s -> Tools -> SSH Configurations -> add new configuration.
+ctrl+alt+s(setting) -> Tools -> SSH Configurations -> add new configuration.
 Fill in the `Host`, `Port`, `User name`, `Auth type` and `Password` according to your remote machine's environment.
 ![img_3.png](img_3.png)
 
