@@ -9,8 +9,8 @@ Before setup auto deployment and debug, you are expected to finish the following
 1. Install go on the remote machine
 2. Make sure ssh connection works between your local machine and the remote machine
 3. Install Goland on your local machine (use student email to get it for free)
-4. Clone another in your local, open it with Goland
-5. Clone the repo to your remote machine and successfully build the project
+4. Clone the repo to your remote machine and successfully build the project
+5. Clone another repo in your local, open it with Goland
 
 
 # deploy
@@ -80,6 +80,11 @@ To start debugging the websocket server, You may run the following command on th
 ```bash
 dlv --listen=:2345 --headless=true --api-version=2 --accept-multiclient exec ./ol -- websocket-api
 ```
+Or debugging Open-Lambda worker by:
+```bash
+dlv --listen=:2345 --headless=true --api-version=2 --accept-multiclient exec ./ol -- worker up
+```
+`--` is used to separate Delve's command line arguments from those of the program being debugged.
 
 At this time, the server is not running yet. The code will not be executed until you start debugging in Goland,
 And if you see the following output, you are good to go.
